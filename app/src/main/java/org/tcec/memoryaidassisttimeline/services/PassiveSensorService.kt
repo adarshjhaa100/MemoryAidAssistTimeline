@@ -23,6 +23,11 @@ import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import android.annotation.SuppressLint
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
+import org.vosk.Recognizer
+import kotlin.math.log10
 
 @AndroidEntryPoint
 class PassiveSensorService : Service() {
@@ -133,11 +138,10 @@ class PassiveSensorService : Service() {
         return START_STICKY
     }
 
+    @SuppressLint("MissingPermission")
     private fun startContinuousListening() {
         scope.launch {
-            // Wait until model is ready loop or just retry?
-            // AudioHelper loads model async. We should retry connecting.
-            var recognizer: org.vosk.Recognizer? = null
+            var recognizer: Recognizer? = null
             while (isActive && recognizer == null) {
                 recognizer = audioHelper.getRecognizer()
                 if (recognizer == null) {
@@ -146,67 +150,126 @@ class PassiveSensorService : Service() {
                 }
             }
 
-            if (!isActive) return@launch
+            if (!isActive || recognizer == null) return@launch
 
-            SensorDataManager.updateVoskStatus("Vosk: Initializing Speech Service...")
+            SensorDataManager.updateVoskStatus("Vosk: Ready (Manual Stream)")
             
-            withContext(Dispatchers.Main) {
+            // Manual AudioRecord Loop
+            val sampleRate = 16000
+            val bufferSize = Math.max(
+                AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT),
+                4096
+            )
+            
+            val audioRecord = AudioRecord(
+                MediaRecorder.AudioSource.MIC,
+                sampleRate,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                bufferSize
+            )
+
+            if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
+                Log.e(TAG, "AudioRecord failed to initialize")
+                SensorDataManager.updateVoskStatus("Audio Error: Init Failed")
+                return@launch
+            }
+
+            try {
+                audioRecord.startRecording()
+                SensorDataManager.updateVoskStatus("Vosk: Listening (Visualizer Active)")
+                
+                val buffer = ByteArray(bufferSize)
+                
+                while (isActive) {
+                    val readResult = audioRecord.read(buffer, 0, bufferSize)
+                    if (readResult > 0) {
+                        // 1. Calculate RMS for Visualizer
+                        // Convert bytes to shorts for amplitude calculation
+                        var sum = 0.0
+                        for (i in 0 until readResult step 2) {
+                            if (i + 1 < readResult) {
+                                val sample = (buffer[i].toInt() and 0xFF) or (buffer[i+1].toInt() shl 8)
+                                val shortSample = sample.toShort()
+                                sum += shortSample * shortSample
+                            }
+                        }
+                        // RMS Amplitude (0..32768)
+                        val rms = Math.sqrt(sum / (readResult / 2)).toFloat()
+                        
+                        // Convert to dBFS (0 is max, -Infinity is silence)
+                        // Reference is 32768.0 (Max 16-bit)
+                        val db = if (rms > 0) {
+                            20 * log10(rms / 32768f)
+                        } else {
+                            -100f // Silence floor
+                        }
+                        
+                        // 2. Feed Vosk & Gate Visualizer
+                        var isSpeechDetected = false
+                        
+                        if (recognizer.acceptWaveForm(buffer, readResult)) {
+                            // Final Result
+                            val result = recognizer.result
+                            val json = JSONObject(result)
+                            val text = json.optString("text", "")
+                            if (text.isNotEmpty()) {
+                                isSpeechDetected = true
+                                Log.d(TAG, "Final: $text")
+                                SensorDataManager.updateLiveTranscription(text)
+                                saveMemory(text)
+                            }
+                        } else {
+                            // Partial Result
+                            val partial = recognizer.partialResult
+                            val json = JSONObject(partial)
+                            val partialText = json.optString("partial", "")
+                            if (partialText.isNotEmpty()) {
+                                isSpeechDetected = true
+                                SensorDataManager.updateLiveTranscription(partialText)
+                            }
+                        }
+                        
+                        // Semantic Gate: Only show pulse if Vosk found words
+                        if (!isSpeechDetected) {
+                            SensorDataManager.addDecibelReading(-100f) // Silence
+                        } else {
+                            SensorDataManager.addDecibelReading(db)
+                        }
+                    } else {
+                        delay(10)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in manual audio loop", e)
+                SensorDataManager.updateVoskStatus("Error: ${e.message}")
+            } finally {
                 try {
-                    speechService = SpeechService(recognizer, 16000.0f)
-                    speechService?.startListening(object : RecognitionListener {
-                        override fun onResult(hypothesis: String) {
-                            try {
-                                val text = JSONObject(hypothesis).getString("text")
-                                if (text.isNotEmpty()) {
-                                    Log.d(TAG, "Final Result: $text")
-                                    SensorDataManager.updateLiveTranscription(text)
-                                    SensorDataManager.updateVoskStatus("Vosk: Saved memory")
-                                    saveMemory(text)
-                                }
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Error parsing final result", e)
-                            }
-                        }
-                        
-                        override fun onPartialResult(hypothesis: String) {
-                             try {
-                                val partial = JSONObject(hypothesis).getString("partial")
-                                if (partial.isNotEmpty()) {
-                                    SensorDataManager.updateLiveTranscription(partial)
-                                    SensorDataManager.updateVoskStatus("Vosk: Listening...")
-                                }
-                            } catch (e: Exception) { }
-                        }
-                        
-                        override fun onFinalResult(hypothesis: String) {
-                            try {
-                                val text = JSONObject(hypothesis).getString("text")
-                                if (text.isNotEmpty()) {
-                                    Log.d(TAG, "Final Result (Final): $text")
-                                    SensorDataManager.updateLiveTranscription(text)
-                                    saveMemory(text)
-                                }
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Error parsing final result", e)
-                            }
-                        }
-                        
-                        override fun onError(exception: Exception) {
-                            Log.e(TAG, "Speech service error", exception)
-                            SensorDataManager.updateVoskStatus("Vosk: Error - ${exception.message}")
-                            // Retry?
-                        }
-                        
-                        override fun onTimeout() {
-                            SensorDataManager.updateVoskStatus("Vosk: Timeout")
-                        }
-                    })
-                    SensorDataManager.updateVoskStatus("Vosk: Listening (Continuous)")
-                } catch (e: Exception) {
-                     Log.e(TAG, "Failed to start speech service", e)
-                     SensorDataManager.updateVoskStatus("Vosk: Failed to start")
+                    audioRecord.stop()
+                    audioRecord.release()
+                } catch (e: Exception) { }
+            }
+        }
+    }
+
+    private fun processVoskResult(jsonResult: String, isFinal: Boolean) {
+        try {
+            val json = JSONObject(jsonResult)
+            if (isFinal) {
+                val text = json.optString("text", "")
+                if (text.isNotEmpty()) {
+                    Log.d(TAG, "Final: $text")
+                    SensorDataManager.updateLiveTranscription(text)
+                    saveMemory(text)
+                }
+            } else {
+                val partial = json.optString("partial", "")
+                if (partial.isNotEmpty()) {
+                    SensorDataManager.updateLiveTranscription(partial)
                 }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "JSON Error: $e")
         }
     }
 

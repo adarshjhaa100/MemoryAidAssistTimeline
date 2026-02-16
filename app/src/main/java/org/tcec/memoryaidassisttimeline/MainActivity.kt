@@ -286,19 +286,25 @@ fun DecibelGraph(viewModel: MemoryViewModel = hiltViewModel()) {
             modifier = Modifier.padding(bottom = 8.dp)
         )
         
+        // Pre-calculate colors outside Canvas (Composable scope)
+        val primaryColor = MaterialTheme.colorScheme.primary
+        val surfaceVariantColor = MaterialTheme.colorScheme.surfaceVariant
+        val baselineColor = androidx.compose.ui.graphics.Color.Gray.copy(alpha = 0.2f)
+        val strokeColor = MaterialTheme.colorScheme.primaryContainer
+
         // Heartbeat Visualizer
         androidx.compose.foundation.Canvas(modifier = Modifier
             .fillMaxWidth()
             .height(60.dp) // Taller for waveform
             .clip(MaterialTheme.shapes.medium)
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+            .background(surfaceVariantColor.copy(alpha = 0.3f))
         ) {
             val centerY = size.height / 2f
             val widthPerPoint = size.width / 100f
             
             // Draw baseline
             drawLine(
-                color = androidx.compose.ui.graphics.Color.Gray.copy(alpha = 0.3f),
+                color = baselineColor,
                 start = androidx.compose.ui.geometry.Offset(0f, centerY),
                 end = androidx.compose.ui.geometry.Offset(size.width, centerY),
                 strokeWidth = 1.dp.toPx()
@@ -306,39 +312,88 @@ fun DecibelGraph(viewModel: MemoryViewModel = hiltViewModel()) {
 
             if (decibels.isNotEmpty()) {
                 val path = androidx.compose.ui.graphics.Path()
-                // Start at center-left
-                path.moveTo(0f, centerY)
+                
+                // Start a smooth path
+                val points = decibels.takeLast(100)
+                if (points.isNotEmpty()) {
+                    path.moveTo(0f, centerY)
+                    
+                    // Creates a mirrored waveform (Siri/Heartbeat style)
+                    points.forEachIndexed { index, db ->
+                        // dB is now -60..0 (approx). 
+                        // Normalize: -50dB -> 0, -10dB -> 1
+                        val normalized = ((db + 50f) / 40f).coerceIn(0f, 1f)
+                        
+                        // Apply non-linear scaling (power) to emphasize peaks and squash noise
+                        val curved = normalized * normalized // Square it
+                        
+                        val amplitude = curved * (size.height / 2.1f)
+                        val x = index * widthPerPoint
+                        
+                        // Add some noise gate/damping visually? 
+                        // Already handled by squared normalization.
+                        
+                        // Top Path (we can't easily dual-path in one go without a closed shape logic)
+                        // Let's draw a nice filled shape.
+                        
+                        // Actually, to do a "Pulse" line, let's just draw the line at Top
+                        // and mirror it?
+                        // Path logic:
+                        // Move 0..Width for Top
+                        // Then LineTo Width..0 for Bottom 
+                        
+                        // But here we are iterating naturally.
+                        // Let's just create a closed shape:
+                        // (x, centerY - amp) ...
+                    }
+                    
+                    // Construct shape:
+                    // 1. Move 0, centerY
+                    // 2. Iterate Forward: (x, centerY - amp)
+                    // 3. LineTo (Width, centerY)
+                    // 4. Iterate Backward: (x, centerY + amp)
+                    // 5. Close
+                    
+                    path.reset()
+                    path.moveTo(0f, centerY)
+                    
+                    // Top Edge
+                    points.forEachIndexed { index, db ->
+                        val normalized = ((db + 50f) / 40f).coerceIn(0f, 1f)
+                        val curved = normalized * normalized
+                        val amplitude = curved * (size.height / 2.1f)
+                        val x = index * widthPerPoint
+                        path.lineTo(x, centerY - amplitude)
+                    }
+                    
+                    // Right Edge
+                    path.lineTo(size.width, centerY)
+                    
+                    // Bottom Edge (Reverse)
+                    for (i in points.indices.reversed()) {
+                        val db = points[i]
+                        val normalized = ((db + 50f) / 40f).coerceIn(0f, 1f)
+                        val curved = normalized * normalized
+                        val amplitude = curved * (size.height / 2.1f)
+                        val x = i * widthPerPoint
+                        path.lineTo(x, centerY + amplitude)
+                    }
+                    
+                    path.close()
 
-                decibels.takeLast(100).forEachIndexed { index, db ->
-                    // Normalize db (-60 to 0 mostly) to amplitude (0 to 1)
-                    // -60db -> 0, 0db -> 1
-                    val normalized = ((db + 60f) / 60f).coerceIn(0f, 1f)
+                     // Pulse Gradient
+                    val brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colors = listOf(
+                            androidx.compose.ui.graphics.Color.Transparent,
+                            primaryColor,
+                            primaryColor,
+                            androidx.compose.ui.graphics.Color.Transparent
+                        )
+                    )
                     
-                    // Amplitude affects height. Max height is centerY (half height)
-                    val amplitude = normalized * (size.height / 2.2f) 
-                    
-                    val x = index * widthPerPoint
-                    
-                    // Draw mirrored wave
-                    // We simulate a wave by alternating up and down or just drawing the envelope?
-                    // Let's draw the envelope (mirrored)
-                    
-                    // Actually, for a heartbeat/waveform look, we want the path to go up and down.
-                    // But we only have RMS/Decibels (envelope). 
-                    // To look cool, we mirror the envelope.
-                    
-                    // We'll draw top half first, then can flip for bottom? 
-                    // Or just draw line from centerY-amp to centerY+amp
-                    
-                   val topY = centerY - amplitude
-                   val bottomY = centerY + amplitude
-                   
-                   drawLine(
-                       color = androidx.compose.ui.graphics.Color(0xFF6366F1), // Violet500
-                       start = androidx.compose.ui.geometry.Offset(x, topY),
-                       end = androidx.compose.ui.geometry.Offset(x, bottomY),
-                       strokeWidth = 3f // Thicker bars
-                   )
+                    drawPath(path = path, brush = brush)
+                    // Optional stroke
+                    drawPath(path = path, color = strokeColor, style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
                 }
             }
         }

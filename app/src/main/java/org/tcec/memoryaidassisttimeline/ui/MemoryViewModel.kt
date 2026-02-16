@@ -30,4 +30,5 @@ class MemoryViewModel @Inject constructor(
     val decibels = org.tcec.memoryaidassisttimeline.data.SensorDataManager.audioDecibels
     val liveTranscription = org.tcec.memoryaidassisttimeline.data.SensorDataManager.liveTranscription
     val isServiceRunning = org.tcec.memoryaidassisttimeline.data.SensorDataManager.isServiceRunning
+    val location = org.tcec.memoryaidassisttimeline.data.SensorDataManager.location
 }

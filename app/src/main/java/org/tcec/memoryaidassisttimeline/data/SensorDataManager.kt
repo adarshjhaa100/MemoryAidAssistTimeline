@@ -13,9 +13,19 @@ object SensorDataManager {
     // Holds the last 100 amplitude readings for the graph
     private val _audioDecibels = MutableStateFlow<List<Float>>(emptyList())
     val audioDecibels = _audioDecibels.asStateFlow()
+    
+    // Live Location State
+    private val _location = MutableStateFlow<String?>(null)
+    val location = _location.asStateFlow()
 
     fun updateVoskStatus(status: String) {
         _voskModelStatus.value = status
+    }
+
+    fun updateLocation(lat: Double, lon: Double) {
+        val loc = "Lat: $lat, Lon: $lon"
+        android.util.Log.d("SensorDataManager", "Updating location: $loc")
+        _location.value = loc
     }
 
     fun updateTfliteStatus(status: String) {

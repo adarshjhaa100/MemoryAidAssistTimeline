@@ -73,7 +73,6 @@ class PassiveSensorService : Service() {
         scope.launch {
             while (isActive) {
                 logLocation()
-                logSensorData()
                 delay(10_000) // Log every 10 seconds for demo/testing
             }
         }
@@ -81,28 +80,27 @@ class PassiveSensorService : Service() {
 
     @SuppressLint("MissingPermission")
     private suspend fun logLocation() {
+        Log.d(TAG, "Requesting location update...")
         try {
             fusedLocationClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null)
                 .addOnSuccessListener { location ->
                     if (location != null) {
+                        Log.d(TAG, "Location received: ${location.latitude}, ${location.longitude}")
+                        // Update UI State
+                        SensorDataManager.updateLocation(location.latitude, location.longitude)
+                        
                         val content = "Lat: ${location.latitude}, Lon: ${location.longitude}"
                         saveMemory(content, MemoryType.LOCATION, "{\"lat\":${location.latitude}, \"lon\":${location.longitude}}")
+                    } else {
+                        Log.w(TAG, "Location received was NULL")
+                        SensorDataManager.updateLocation(0.0, 0.0) // Debug: Show 0,0 if null
                     }
                 }
+                .addOnFailureListener { e ->
+                    Log.e(TAG, "Location request failed", e)
+                }
         } catch (e: Exception) {
-            Log.e(TAG, "Error getting location", e)
-        }
-    }
-
-    private fun logSensorData() {
-        try {
-            val bm = getSystemService(BATTERY_SERVICE) as android.os.BatteryManager
-            val batLevel = bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
-            
-            val content = "Battery: $batLevel%"
-            saveMemory(content, MemoryType.SENSOR, "{\"type\":\"battery\", \"value\":$batLevel}")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error getting battery level", e)
+            Log.e(TAG, "Error requesting location", e)
         }
     }
 

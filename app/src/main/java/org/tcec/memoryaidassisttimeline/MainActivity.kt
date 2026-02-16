@@ -155,6 +155,7 @@ fun MainScreen(startService: () -> Unit) {
 fun StatusSection(viewModel: MemoryViewModel = hiltViewModel()) {
     val voskStatus by viewModel.voskStatus.collectAsState()
     val tfliteStatus by viewModel.tfliteStatus.collectAsState()
+    val location by viewModel.location.collectAsState()
     
     Column(modifier = Modifier.padding(horizontal = 16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -165,6 +166,11 @@ fun StatusSection(viewModel: MemoryViewModel = hiltViewModel()) {
         Spacer(modifier = Modifier.height(4.dp))
         Text(text = voskStatus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
         Text(text = tfliteStatus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+        if (location != null) {
+            Text(text = location ?: "Checking location...", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+        } else {
+             Text(text = "Location: Waiting...", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
     }
 }
 

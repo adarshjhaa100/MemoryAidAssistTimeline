@@ -18,7 +18,7 @@ accompanistPermissions = "0.34.0"
 ksp = "1.9.22-1.0.17"
 uiGraphics = "1.10.3"
 
-
+gson = "2.10.1"
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
@@ -53,6 +53,7 @@ jna = { group = "net.java.dev.jna", name = "jna", version.ref = "jna" }
 
 # Utils
 accompanist-permissions = { group = "com.google.accompanist", name = "accompanist-permissions", version.ref = "accompanistPermissions" }
+gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
 
 
 [plugins]

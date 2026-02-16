@@ -84,6 +84,7 @@ dependencies {
 
     // Utils
     implementation(libs.accompanist.permissions)
+    implementation(libs.gson)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

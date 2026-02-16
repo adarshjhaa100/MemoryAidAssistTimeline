@@ -69,11 +69,14 @@ class PassiveSensorService : Service() {
         }
     }
 
+    private var lastLoggedLocation: android.location.Location? = null
+    private var lastLoggedTime: Long = 0
+
     private fun startSensorLogging() {
         scope.launch {
             while (isActive) {
                 logLocation()
-                delay(10_000) // Log every 10 seconds for demo/testing
+                delay(10_000) // Check every 10 seconds
             }
         }
     }
@@ -85,15 +88,33 @@ class PassiveSensorService : Service() {
             fusedLocationClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null)
                 .addOnSuccessListener { location ->
                     if (location != null) {
-                        Log.d(TAG, "Location received: ${location.latitude}, ${location.longitude}")
-                        // Update UI State
+                        // Always update UI
                         SensorDataManager.updateLocation(location.latitude, location.longitude)
                         
-                        val content = "Lat: ${location.latitude}, Lon: ${location.longitude}"
-                        saveMemory(content, MemoryType.LOCATION, "{\"lat\":${location.latitude}, \"lon\":${location.longitude}}")
+                        // Smart Logging Logic
+                        val shouldLog = if (lastLoggedLocation == null) {
+                            true
+                        } else {
+                            val distance = location.distanceTo(lastLoggedLocation!!)
+                            val timeDiff = System.currentTimeMillis() - lastLoggedTime
+                            
+                            // Log if moved > 10m OR if 1 minute passed
+                            distance > 10 || timeDiff >= 60_000
+                        }
+
+                        if (shouldLog) {
+                            Log.d(TAG, "Logging Location: Moved or Time Limit reached.")
+                            val content = "Lat: ${location.latitude}, Lon: ${location.longitude}"
+                            saveMemory(content, MemoryType.LOCATION, "{\"lat\":${location.latitude}, \"lon\":${location.longitude}}")
+                            
+                            lastLoggedLocation = location
+                            lastLoggedTime = System.currentTimeMillis()
+                        } else {
+                            Log.d(TAG, "Skipping Location Log: No significant move & < 1 min.")
+                        }
                     } else {
                         Log.w(TAG, "Location received was NULL")
-                        SensorDataManager.updateLocation(0.0, 0.0) // Debug: Show 0,0 if null
+                        SensorDataManager.updateLocation(0.0, 0.0)
                     }
                 }
                 .addOnFailureListener { e ->

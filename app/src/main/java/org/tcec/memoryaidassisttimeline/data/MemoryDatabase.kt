@@ -10,6 +10,9 @@ interface MemoryDao {
 
     @Query("SELECT * FROM memory_nodes ORDER BY timestamp DESC")
     fun getAllMemories(): Flow<List<MemoryNode>>
+
+    @Query("SELECT * FROM memory_nodes ORDER BY timestamp ASC")
+    suspend fun getAllMemoriesList(): List<MemoryNode>
 }
 
 @Database(entities = [MemoryNode::class], version = 2)

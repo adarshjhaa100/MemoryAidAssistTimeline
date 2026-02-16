@@ -16,6 +16,8 @@ playServicesLocation = "21.1.0"
 jna = "5.13.0"
 accompanistPermissions = "0.34.0"
 ksp = "1.9.22-1.0.17"
+uiGraphics = "1.10.3"
+
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -51,6 +53,7 @@ jna = { group = "net.java.dev.jna", name = "jna", version.ref = "jna" }
 
 # Utils
 accompanist-permissions = { group = "com.google.accompanist", name = "accompanist-permissions", version.ref = "accompanistPermissions" }
+
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

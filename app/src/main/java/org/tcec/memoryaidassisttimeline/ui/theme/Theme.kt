@@ -35,9 +35,9 @@ private val LightColorScheme = lightColorScheme(
 
 @Composable
 fun MemoryAidAssistTimelineTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = true, // Force Dark Theme
     // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
+    dynamicColor: Boolean = false, // Disable dynamic color to use our custom palette
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {

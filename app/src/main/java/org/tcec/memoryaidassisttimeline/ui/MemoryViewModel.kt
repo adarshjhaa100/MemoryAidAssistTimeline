@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import org.tcec.memoryaidassisttimeline.data.MemoryDao
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 
@@ -12,8 +13,17 @@ import javax.inject.Inject
 class MemoryViewModel @Inject constructor(
     dao: MemoryDao
 ) : ViewModel() {
-    val memories = dao.getAllMemories()
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    private val _searchQuery = kotlinx.coroutines.flow.MutableStateFlow("")
+    val searchQuery = _searchQuery.asStateFlow()
+
+    fun updateSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
+
+    val memories = kotlinx.coroutines.flow.combine(dao.getAllMemories(), _searchQuery) { list, query ->
+        if (query.isBlank()) list
+        else list.filter { it.content.contains(query, ignoreCase = true) }
+    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
         
     val voskStatus = org.tcec.memoryaidassisttimeline.data.SensorDataManager.voskModelStatus
     val tfliteStatus = org.tcec.memoryaidassisttimeline.data.SensorDataManager.tfliteModelStatus

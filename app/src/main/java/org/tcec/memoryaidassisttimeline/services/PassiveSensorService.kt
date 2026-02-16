@@ -2,9 +2,11 @@ package org.tcec.memoryaidassisttimeline.services
 
 import android.app.*
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import org.tcec.memoryaidassisttimeline.R
 import org.tcec.memoryaidassisttimeline.data.MemoryDao
 import org.tcec.memoryaidassisttimeline.data.MemoryNode
@@ -17,6 +19,11 @@ import javax.inject.Inject
 import org.json.JSONObject
 import org.tcec.memoryaidassisttimeline.data.SensorDataManager
 
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import android.annotation.SuppressLint
+
 @AndroidEntryPoint
 class PassiveSensorService : Service() {
 
@@ -25,6 +32,7 @@ class PassiveSensorService : Service() {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private lateinit var audioHelper: AudioHelper
     private var speechService: SpeechService? = null
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
     
     companion object {
         private const val TAG = "MemorySensorService"
@@ -34,12 +42,68 @@ class PassiveSensorService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "Service created")
-        SensorDataManager.setServiceRunning(true)
-        audioHelper = AudioHelper(this)
-        startForeground(1, createNotification())
-        
-        // Start continuous listening immediately
-        startContinuousListening()
+        try {
+            SensorDataManager.setServiceRunning(true)
+            
+            // 1. Start Foreground IMMEDIATELY to avoid ANR/Crash
+            val types = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            } else {
+                0
+            }
+            ServiceCompat.startForeground(this, 1, createNotification(), types)
+
+            // 2. Initialize Components
+            audioHelper = AudioHelper(this)
+            fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+            
+            // 3. Start Logic
+            startContinuousListening()
+            startSensorLogging()
+        } catch (e: Exception) {
+            Log.e(TAG, "Fatal Error in Service onCreate", e)
+            // Ensure we don't leave a broken service running?
+            // If startForeground failed, we are already dead.
+            // If AudioHelper failed, we might want to run without it?
+            // For now, logging stack trace is critical.
+        }
+    }
+
+    private fun startSensorLogging() {
+        scope.launch {
+            while (isActive) {
+                logLocation()
+                logSensorData()
+                delay(10_000) // Log every 10 seconds for demo/testing
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun logLocation() {
+        try {
+            fusedLocationClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null)
+                .addOnSuccessListener { location ->
+                    if (location != null) {
+                        val content = "Lat: ${location.latitude}, Lon: ${location.longitude}"
+                        saveMemory(content, MemoryType.LOCATION, "{\"lat\":${location.latitude}, \"lon\":${location.longitude}}")
+                    }
+                }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting location", e)
+        }
+    }
+
+    private fun logSensorData() {
+        try {
+            val bm = getSystemService(BATTERY_SERVICE) as android.os.BatteryManager
+            val batLevel = bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            
+            val content = "Battery: $batLevel%"
+            saveMemory(content, MemoryType.SENSOR, "{\"type\":\"battery\", \"value\":$batLevel}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting battery level", e)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -124,27 +188,18 @@ class PassiveSensorService : Service() {
                      SensorDataManager.updateVoskStatus("Vosk: Failed to start")
                 }
             }
-            
-            // Background loop for decibel updates only (optional, if we want graph to move)
-            // Since we are not manually reading audioRecord here anymore (SpeechService does it),
-            // we cannot easily get decibels unless we hook into SpeechService or run a parallel reader?
-            // Running parallel reader on same AudioSource usually fails on Android.
-            // For now, we accept that Graph might be static OR we rely on a simulated/mock level if needed,
-            // OR we try to read from AudioHelper if it supports non-exclusive. 
-            // NOTE: AudioHelper.isSpeechDetected logic is now unused for control flow,
-            // but we can still call it periodically to update the graph if it doesn't conflict with SpeechService.
-            // However, SpeechService locks the mic. calling audioHelper.isSpeechDetected() which tries to startRecording() will likely fail.
-            // So Decibel graph might die here. That's a trade-off for using Vosk SpeechService directly.
-            // To fix this properly, we'd need to implementing raw audio reading and feed Vosk manually. 
-            // For this iteration, let's just log that we are skipping manual audio reads.
         }
     }
 
-    private fun saveMemory(text: String) {
+    private fun saveMemory(text: String, type: MemoryType = MemoryType.AUDIO, details: String? = null) {
         scope.launch {
-            Log.d(TAG, "Saving memory: $text")
+            Log.d(TAG, "Saving memory: $text [$type]")
             try {
-                memoryDao.insert(MemoryNode(type = MemoryType.AUDIO, content = text))
+                memoryDao.insert(MemoryNode(
+                    type = type, 
+                    content = text,
+                    details = details
+                ))
                 Log.d(TAG, "Memory saved successfully")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to save memory", e)

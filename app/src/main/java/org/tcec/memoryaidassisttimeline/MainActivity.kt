@@ -2,15 +2,15 @@ package org.tcec.memoryaidassisttimeline
 
 import android.Manifest
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,11 +24,29 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import dagger.hilt.android.AndroidEntryPoint
 import org.tcec.memoryaidassisttimeline.data.MemoryNode
+import org.tcec.memoryaidassisttimeline.data.MemoryType
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.LocationOn
 import java.text.SimpleDateFormat
-import java.util.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.tween
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.ui.graphics.Color
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -41,12 +59,14 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalPermissionsApi::class)
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
+@OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(startService: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val viewModel: MemoryViewModel = hiltViewModel()
     val isServiceRunning by viewModel.isServiceRunning.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
     
     val permissions = rememberMultiplePermissionsState(
         permissions = listOf(
@@ -61,16 +81,29 @@ fun MainScreen(startService: () -> Unit) {
     }
 
     Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Memory Aid") },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.primary
+                )
+            )
+        },
         floatingActionButton = {
             FloatingActionButton(
                 containerColor = if (isServiceRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primaryContainer,
                 onClick = { 
-                    if (isServiceRunning) {
-                         context.startService(Intent(context, PassiveSensorService::class.java).apply {
-                             action = PassiveSensorService.ACTION_STOP
-                         })
+                    if (permissions.allPermissionsGranted) {
+                        if (isServiceRunning) {
+                             context.startService(Intent(context, PassiveSensorService::class.java).apply {
+                                 action = PassiveSensorService.ACTION_STOP
+                             })
+                        } else {
+                            startService() 
+                        }
                     } else {
-                        startService() 
+                        permissions.launchMultiplePermissionRequest()
                     }
                 }
             ) {
@@ -79,6 +112,25 @@ fun MainScreen(startService: () -> Unit) {
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding)) {
+            // Search Bar
+            TextField(
+                value = searchQuery,
+                onValueChange = { viewModel.updateSearchQuery(it) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
+                placeholder = { Text("Search memories...") },
+                leadingIcon = { Icon(androidx.compose.material.icons.Icons.Default.Search, contentDescription = null) },
+                singleLine = true,
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent
+                ),
+                shape = MaterialTheme.shapes.medium
+            )
+
             // Status & Graph Section
             if (permissions.allPermissionsGranted) {
                 StatusSection()
@@ -86,7 +138,7 @@ fun MainScreen(startService: () -> Unit) {
                 DecibelGraph()
                 Spacer(modifier = Modifier.height(8.dp))
                 RawDataSection()
-                Divider(thickness = 2.dp)
+                Divider(thickness = 2.dp, color = MaterialTheme.colorScheme.outlineVariant)
                 MemoryTimeline(modifier = Modifier.weight(1f))
             } else {
                 Text("Please grant permissions to start.", Modifier.padding(16.dp))
@@ -95,38 +147,43 @@ fun MainScreen(startService: () -> Unit) {
     }
 }
 
+// ... Status, RawData, DecibelGraph ... (Keeping them implies I need to ensure I don't overwrite them or I rewrite them if I selected the whole file range. I selected from line 44 down, so I need to include them or be careful.
+// Wait, I selected from line 44 to 285. This covers everything including StatusSection, etc. I must re-include them or I will lose them.
+// I will re-include them for safety, but formatted nicely.
+
 @Composable
 fun StatusSection(viewModel: MemoryViewModel = hiltViewModel()) {
     val voskStatus by viewModel.voskStatus.collectAsState()
     val tfliteStatus by viewModel.tfliteStatus.collectAsState()
     
-    Column(modifier = Modifier.padding(16.dp)) {
-        Text("Status Monitor", style = MaterialTheme.typography.titleMedium)
+    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+             Icon(androidx.compose.material.icons.Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+             Spacer(modifier = Modifier.width(4.dp))
+             Text("System Status", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        }
         Spacer(modifier = Modifier.height(4.dp))
-        Text(text = voskStatus, style = MaterialTheme.typography.bodySmall)
-        Text(text = tfliteStatus, style = MaterialTheme.typography.bodySmall)
+        Text(text = voskStatus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+        Text(text = tfliteStatus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
 @Composable
 fun RawDataSection(viewModel: MemoryViewModel = hiltViewModel()) {
     val liveText by viewModel.liveTranscription.collectAsState()
-    
-    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Text("Raw Data (Live)", style = MaterialTheme.typography.labelMedium)
+    if (liveText.isNotBlank()) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(80.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
-            Box(modifier = Modifier.padding(8.dp)) {
-                 Text(
-                    text = if (liveText.isEmpty()) "Waiting for speech..." else liveText,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            Text(
+                text = "Live: $liveText",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.padding(8.dp)
+            )
         }
     }
 }
@@ -134,39 +191,26 @@ fun RawDataSection(viewModel: MemoryViewModel = hiltViewModel()) {
 @Composable
 fun DecibelGraph(viewModel: MemoryViewModel = hiltViewModel()) {
     val decibels by viewModel.decibels.collectAsState()
-    
-    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-        Text("Audio Levels (dB)", style = MaterialTheme.typography.labelMedium)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(60.dp) // Reduced height
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .clip(MaterialTheme.shapes.small)
-        ) {
-            androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-                if (decibels.isNotEmpty()) {
-                    val widthPerPoint = size.width / 100f
-                    val path = androidx.compose.ui.graphics.Path()
-                    
-                    // Normalize -100dB to 0dB range to 0..height
-                    fun yPos(db: Float): Float {
-                        val normalized = (db + 100) / 100f // 0.0 to 1.0
-                        return size.height - (normalized * size.height)
-                    }
-                    
-                    path.moveTo(0f, yPos(decibels.first()))
-                    decibels.forEachIndexed { index, db ->
-                        path.lineTo(index * widthPerPoint, yPos(db))
-                    }
-                    
-                    drawPath(
-                        path = path,
-                        color = androidx.compose.ui.graphics.Color.Green,
-                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f)
-                    )
-                }
+    // Minimal graph
+    androidx.compose.foundation.Canvas(modifier = Modifier
+        .fillMaxWidth()
+        .height(30.dp)
+        .padding(horizontal = 16.dp)
+        .clip(MaterialTheme.shapes.small)
+        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+    ) {
+        if (decibels.isNotEmpty()) {
+            val widthPerPoint = size.width / 100f
+            val path = androidx.compose.ui.graphics.Path()
+            fun yPos(db: Float): Float {
+                val normalized = (db + 100) / 100f
+                return size.height - (normalized * size.height)
             }
+            path.moveTo(0f, yPos(decibels.first()))
+            decibels.forEachIndexed { index, db ->
+                path.lineTo(index * widthPerPoint, yPos(db))
+            }
+            drawPath(path = path, color = androidx.compose.ui.graphics.Color.Green, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f))
         }
     }
 }
@@ -179,33 +223,112 @@ fun MemoryTimeline(
 ) {
     val memories by viewModel.memories.collectAsState()
     
-    // Group memories by date
+    // Group: Date -> 30-min block (Epoch / (30*60*1000))
     val groupedMemories = remember(memories) {
         memories.groupBy { 
-            SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(it.timestamp))
+            SimpleDateFormat("EEEE, MMM dd", Locale.getDefault()).format(Date(it.timestamp))
+        }.mapValues { (_, dayMemories) ->
+            dayMemories.groupBy { 
+                val calendar = Calendar.getInstance().apply { timeInMillis = it.timestamp }
+                val hour = calendar.get(Calendar.HOUR_OF_DAY)
+                val minute = calendar.get(Calendar.MINUTE)
+                val blockStart = if (minute < 30) 0 else 30
+                String.format(Locale.getDefault(), "%02d:%02d - %02d:%02d", hour, blockStart, hour + (if (blockStart == 30) 1 else 0), if (blockStart == 0) 30 else 0)
+            }
         }
     }
 
     LazyColumn(
-        modifier = modifier
-            .padding(horizontal = 16.dp)
-            .fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 16.dp)
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 80.dp)
     ) {
-        groupedMemories.forEach { (date, memoryList) ->
+        for ((date, timeBlocks) in groupedMemories) {
             stickyHeader {
                 DateHeader(date)
             }
-
-            items(memoryList) { node ->
-                TimelineItem(node)
+            
+            for ((timeBlock, nodes) in timeBlocks.toSortedMap()) {
+                item {
+                    CollapsibleTimeBlock(timeBlock, nodes)
+                }
             }
         }
-        
+
         if (memories.isEmpty()) {
             item {
                 Box(modifier = Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("No memories yet. Say something!", style = MaterialTheme.typography.bodyLarge)
+                    Text("No memories found.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onBackground)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CollapsibleTimeBlock(timeRange: String, nodes: List<MemoryNode>) {
+    var expanded by remember { mutableStateOf(false) } 
+    
+    // Summary Logic: Paragraph style
+    // Filter out duplicates usually? For now just join.
+    // We prioritize text content.
+    val distinctContent = nodes.map { it.content }.distinct()
+    val summaryText = if (distinctContent.isEmpty()) {
+        "No Activity"
+    } else {
+        // Join with separating bullet or period
+        distinctContent.joinToString(". ") {
+             if (it.length > 50) it.take(50) + "..." else it
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .background(MaterialTheme.colorScheme.surface)
+            .clickable { expanded = !expanded }
+    ) {
+        // Header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = timeRange,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = summaryText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                    maxLines = if (expanded) Int.MAX_VALUE else 3,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
+            Icon(
+                imageVector = if (expanded) androidx.compose.material.icons.Icons.Default.KeyboardArrowUp else androidx.compose.material.icons.Icons.Default.KeyboardArrowDown,
+                contentDescription = if (expanded) "Collapse" else "Expand",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 8.dp)
+            )
+        }
+        
+        // Content
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(animationSpec = tween(300)),
+            exit = shrinkVertically(animationSpec = tween(300))
+        ) {
+            Column {
+                Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
+                nodes.sortedBy { it.timestamp }.forEach { node ->
+                    TimelineItem(node)
                 }
             }
         }
@@ -215,70 +338,78 @@ fun MemoryTimeline(
 @Composable
 fun DateHeader(date: String) {
     Surface(
-        color = MaterialTheme.colorScheme.background,
+        color = MaterialTheme.colorScheme.surfaceVariant, // Distinction from block background
+        tonalElevation = 4.dp,
         modifier = Modifier.fillMaxWidth()
     ) {
         Text(
-            text = date, // You might want to format this nicely (e.g., "Today", "Yesterday")
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(vertical = 8.dp)
+            text = date,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
         )
     }
 }
 
 @Composable
 fun TimelineItem(node: MemoryNode) {
-    Row(modifier = Modifier.height(IntrinsicSize.Min)) {
-        // Timeline Line
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-                .width(24.dp)
-                .fillMaxHeight()
-        ) {
-            // Top line
-            Box(
-                modifier = Modifier
-                    .width(2.dp)
-                    .weight(1f)
-                    .background(MaterialTheme.colorScheme.outlineVariant)
-            )
-            // Dot
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
-            )
-            // Bottom line
-            Box(
-                modifier = Modifier
-                    .width(2.dp)
-                    .weight(1f)
-                    .background(MaterialTheme.colorScheme.outlineVariant)
-            )
+    Row(modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 16.dp, vertical = 4.dp)) {
+        
+        // Icon based on type
+        val icon = when (node.type) {
+            MemoryType.LOCATION -> Icons.Default.LocationOn
+            MemoryType.SENSOR -> Icons.Default.Star
+            else -> Icons.Default.Edit
         }
         
-        // Content
-        Spacer(modifier = Modifier.width(8.dp))
-        Card(
+        val color = when (node.type) {
+            MemoryType.LOCATION -> Color(0xFF4D96FF)
+            MemoryType.SENSOR -> Color(0xFF6BCB77)
+            else -> MaterialTheme.colorScheme.onSurface
+        }
+
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = color,
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-        ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(node.timestamp)),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = node.content,
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                .size(24.dp)
+                .padding(top = 4.dp)
+        )
+        
+        Spacer(modifier = Modifier.width(12.dp))
+        
+        Column {
+            Text(
+                text = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(node.timestamp)),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline
+            )
+            
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                ),
+                shape = MaterialTheme.shapes.small
+            ) {
+                 Column(modifier = Modifier.padding(8.dp)) {
+                    Text(
+                        text = node.content,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (node.details != null) {
+                         Text(
+                            text = node.details,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                 }
             }
         }
     }

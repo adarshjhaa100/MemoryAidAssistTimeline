@@ -12,7 +12,7 @@ interface MemoryDao {
     fun getAllMemories(): Flow<List<MemoryNode>>
 }
 
-@Database(entities = [MemoryNode::class], version = 1)
+@Database(entities = [MemoryNode::class], version = 2)
 abstract class MemoryDatabase : RoomDatabase() {
     abstract fun memoryDao(): MemoryDao
 }
